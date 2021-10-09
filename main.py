@@ -1,12 +1,18 @@
 from load_data import Data
 import numpy as np
+import os
+# 要在导入torch前
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # 设备ID=物理ID
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
 import torch
+import torch.nn as nn
 import time
 from collections import defaultdict
 from model import *
 from torch.optim.lr_scheduler import ExponentialLR
 import argparse
-
+from tqdm import tqdm
     
 class Experiment:
 
@@ -58,7 +64,7 @@ class Experiment:
 
         print("Number of data points: %d" % len(test_data_idxs))
         
-        for i in range(0, len(test_data_idxs), self.batch_size):
+        for i in tqdm(range(0, len(test_data_idxs), self.batch_size)):
             data_batch, _ = self.get_batch(er_vocab, test_data_idxs, i)
             e1_idx = torch.tensor(data_batch[:,0])
             r_idx = torch.tensor(data_batch[:,1])
@@ -107,8 +113,10 @@ class Experiment:
 
         model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim, **self.kwargs)
         if self.cuda:
+            # model = nn.DataParallel(model)
             model.cuda()
         model.init()
+        # model.module.init()
         opt = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
         if self.decay_rate:
             scheduler = ExponentialLR(opt, self.decay_rate)
@@ -117,12 +125,14 @@ class Experiment:
         er_vocab_pairs = list(er_vocab.keys())
 
         print("Starting training...")
-        for it in range(1, self.num_iterations+1):
+        for it in tqdm(range(1, self.num_iterations+1)):
             start_train = time.time()
             model.train()    
             losses = []
             np.random.shuffle(er_vocab_pairs)
-            for j in range(0, len(er_vocab_pairs), self.batch_size):
+            print(len(er_vocab_pairs))
+
+            for j in tqdm(range(0, len(er_vocab_pairs), self.batch_size)):
                 data_batch, targets = self.get_batch(er_vocab, er_vocab_pairs, j)
                 opt.zero_grad()
                 e1_idx = torch.tensor(data_batch[:,0])
@@ -133,6 +143,7 @@ class Experiment:
                 predictions = model.forward(e1_idx, r_idx)
                 if self.label_smoothing:
                     targets = ((1.0-self.label_smoothing)*targets) + (1.0/targets.size(1))           
+                # loss = model.module.loss(predictions, targets)
                 loss = model.loss(predictions, targets)
                 loss.backward()
                 opt.step()
